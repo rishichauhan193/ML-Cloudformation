@@ -151,7 +151,7 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ProjectName: !Ref CodeBuildProject
-
+                
         - Name: Deploy
           Actions:
             - Name: DeployLambda
@@ -165,9 +165,10 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 StackName: LangChainStack
-                Capabilities: CAPABILITY_IAM
+                Capabilities: CAPABILITY_IAM,CAPABILITY_AUTO_EXPAND
                 TemplatePath: BuildOutput::packaged.yaml
                 RoleArn: !GetAtt CloudFormationExecutionRole.Arn
+
 
 Outputs:
   CICDStatus:
