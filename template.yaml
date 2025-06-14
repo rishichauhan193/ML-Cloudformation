@@ -38,22 +38,26 @@ Resources:
   ArtifactBucket:
     Type: AWS::S3::Bucket
 
-  CodePipelineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codepipeline.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: PipelinePolicy
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action: "*"
-                Resource: "*"
+CodePipelineRole:
+  Type: AWS::IAM::Role
+  Properties:
+    AssumeRolePolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              - codepipeline.amazonaws.com
+              - codebuild.amazonaws.com   # ✅ Allow CodeBuild to assume this role
+          Action: sts:AssumeRole
+    Policies:
+      - PolicyName: PipelinePolicy
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: "*"
+              Resource: "*"
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
