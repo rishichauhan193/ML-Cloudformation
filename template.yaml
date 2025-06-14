@@ -10,13 +10,14 @@ Parameters:
     Default: rishichauhan193
     Type: String
   GitHubBranch:
-    Default: main
     Type: String
+    Default: main
   GitHubToken:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /github/oauth/token
 
 Resources:
+
   LangChainFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -38,26 +39,26 @@ Resources:
   ArtifactBucket:
     Type: AWS::S3::Bucket
 
-CodePipelineRole:
-  Type: AWS::IAM::Role
-  Properties:
-    AssumeRolePolicyDocument:
-      Version: "2012-10-17"
-      Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-              - codepipeline.amazonaws.com
-              - codebuild.amazonaws.com   # ✅ Allow CodeBuild to assume this role
-          Action: sts:AssumeRole
-    Policies:
-      - PolicyName: PipelinePolicy
-        PolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action: "*"
-              Resource: "*"
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+                - codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PipelinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "*"
+                Resource: "*"
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -102,7 +103,7 @@ CodePipelineRole:
         Type: CODEPIPELINE
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0
+        Image: aws/codebuild/standard:7.0  # ✅ Updated, supported image
         Type: LINUX_CONTAINER
         EnvironmentVariables:
           - Name: S3_BUCKET_NAME
