@@ -64,6 +64,9 @@ Resources:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
       Stages:
         - Name: Source
           Actions:
@@ -94,6 +97,7 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ProjectName: !Ref CodeBuildProject
+
 
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
