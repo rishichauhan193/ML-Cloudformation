@@ -53,6 +53,7 @@ Resources:
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: CodePipelineServiceRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -67,6 +68,32 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: "*"
+                Resource: "*"
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CloudFormationExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudFormationExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - iam:PassRole
+                  - iam:GetRole
+                  - lambda:*
+                  - s3:*
+                  - logs:*
                 Resource: "*"
 
   CodeBuildProject:
@@ -140,6 +167,7 @@ Resources:
                 StackName: LangChainStack
                 Capabilities: CAPABILITY_IAM
                 TemplatePath: BuildOutput::packaged.yaml
+                RoleArn: !GetAtt CloudFormationExecutionRole.Arn
 
 Outputs:
   CICDStatus:
