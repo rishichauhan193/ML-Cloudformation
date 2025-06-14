@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: LangChain QA Lambda with CI/CD
+Description: LangChain QA Pipeline (CI/CD Only)
 
 Parameters:
   GitHubRepo:
@@ -20,22 +20,6 @@ Resources:
 
   ArtifactBucket:
     Type: AWS::S3::Bucket
-
-  LangChainFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: langchain-qa
-      Handler: main.lambda_handler
-      Runtime: python3.11
-      CodeUri: .
-      Timeout: 30
-      MemorySize: 256
-      Events:
-        AskAPI:
-          Type: Api
-          Properties:
-            Path: /ask
-            Method: get
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -74,8 +58,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service:
-                - codepipeline.amazonaws.com
+              Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: CodePipelinePolicy
@@ -159,6 +142,6 @@ Resources:
                 TemplatePath: BuildOutput::packaged.yaml
 
 Outputs:
-  ApiUrl:
-    Description: "Invoke URL"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/ask?q=hello"
+  CICDStatus:
+    Description: "CI/CD pipeline deployed successfully"
+    Value: "Check CodePipeline in AWS Console"
