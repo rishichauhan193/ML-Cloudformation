@@ -29,11 +29,11 @@ Resources:
       Runtime: python3.11
       CodeUri:
         Bucket: !Ref ArtifactBucket
-        Key: function.zip  # Output zip file from CodeBuild
+        Key: function.zip  # This is uploaded by CodeBuild
       Timeout: 30
       MemorySize: 256
       Events:
-        ApiEvent:
+        AskAPI:
           Type: Api
           Properties:
             Path: /ask
@@ -49,16 +49,32 @@ Resources:
             Principal:
               Service:
                 - codepipeline.amazonaws.com
-                - codebuild.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: PipelinePolicy
+        - PolicyName: CodePipelinePolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: "*"
                 Resource: "*"
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: LangChainBuild
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: S3_BUCKET_NAME
+            Value: !Ref ArtifactBucket
+      ServiceRole: !GetAtt CodePipelineRole.Arn
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -83,9 +99,10 @@ Resources:
                 Repo: !Ref GitHubRepo
                 Branch: !Ref GitHubBranch
                 OAuthToken: !Ref GitHubToken
+
         - Name: Build
           Actions:
-            - Name: LambdaBuildAndPackage
+            - Name: BuildAndPackageLambda
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -98,24 +115,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref CodeBuildProject
 
-  CodeBuildProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: LangChainBuild
-      Source:
-        Type: CODEPIPELINE
-      Artifacts:
-        Type: CODEPIPELINE
-      Environment:
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0
-        Type: LINUX_CONTAINER
-        EnvironmentVariables:
-          - Name: S3_BUCKET_NAME
-            Value: !Ref ArtifactBucket
-      ServiceRole: !GetAtt CodePipelineRole.Arn
-
 Outputs:
-  ApiURL:
+  ApiUrl:
     Description: "Invoke URL"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/ask?q=hello"
