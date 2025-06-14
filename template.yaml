@@ -27,8 +27,11 @@ Resources:
       FunctionName: langchain-qa
       Handler: main.lambda_handler
       Runtime: python3.11
-      CodeUri: !Sub "s3://${ArtifactBucket}/${BuildOutputArtifact}"
+      CodeUri:
+        Bucket: !Ref ArtifactBucket
+        Key: function.zip  # Output zip file from CodeBuild
       Timeout: 30
+      MemorySize: 256
       Events:
         ApiEvent:
           Type: Api
@@ -82,7 +85,7 @@ Resources:
                 OAuthToken: !Ref GitHubToken
         - Name: Build
           Actions:
-            - Name: LambdaBuildAndDeploy
+            - Name: LambdaBuildAndPackage
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -101,6 +104,8 @@ Resources:
       Name: LangChainBuild
       Source:
         Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
@@ -109,10 +114,6 @@ Resources:
           - Name: S3_BUCKET_NAME
             Value: !Ref ArtifactBucket
       ServiceRole: !GetAtt CodePipelineRole.Arn
-      Artifacts:
-        Type: CODEPIPELINE
-      Cache:
-        Type: NO_CACHE
 
 Outputs:
   ApiURL:
