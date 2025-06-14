@@ -74,7 +74,7 @@ Resources:
         EnvironmentVariables:
           - Name: S3_BUCKET_NAME
             Value: !Ref ArtifactBucket
-      ServiceRole: !GetAtt CodePipelineRole.Arn
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
