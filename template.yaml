@@ -4,11 +4,11 @@ Description: LangChain QA Lambda with CI/CD
 
 Parameters:
   GitHubRepo:
+    Type: String
     Default: ML-Project
-    Type: String
   GitHubOwner:
-    Default: rishichauhan193
     Type: String
+    Default: rishichauhan193
   GitHubBranch:
     Type: String
     Default: main
@@ -18,6 +18,9 @@ Parameters:
 
 Resources:
 
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+
   LangChainFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -26,7 +29,7 @@ Resources:
       Runtime: python3.11
       CodeUri:
         Bucket: !Ref ArtifactBucket
-        Key: langchain/function.zip
+        Key: function.zip
       MemorySize: 256
       Timeout: 30
       Events:
@@ -35,9 +38,6 @@ Resources:
           Properties:
             Path: /ask
             Method: get
-
-  ArtifactBucket:
-    Type: AWS::S3::Bucket
 
   CodePipelineRole:
     Type: AWS::IAM::Role
@@ -85,7 +85,7 @@ Resources:
                 OAuthToken: !Ref GitHubToken
         - Name: Build
           Actions:
-            - Name: CodeBuild
+            - Name: LambdaBuildAndDeploy
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -98,7 +98,6 @@ Resources:
               Configuration:
                 ProjectName: !Ref CodeBuildProject
 
-
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -107,7 +106,7 @@ Resources:
         Type: CODEPIPELINE
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0  # ✅ Updated, supported image
+        Image: aws/codebuild/standard:7.0
         Type: LINUX_CONTAINER
         EnvironmentVariables:
           - Name: S3_BUCKET_NAME
@@ -115,6 +114,8 @@ Resources:
       ServiceRole: !GetAtt CodePipelineRole.Arn
       Artifacts:
         Type: CODEPIPELINE
+      Cache:
+        Type: NO_CACHE
 
 Outputs:
   ApiURL:
