@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: LangChain QA Lambda with CI/CD
+
+Parameters:
+  GitHubRepo:
+    Type: String
+  GitHubOwner:
+    Type: String
+  GitHubBranch:
+    Type: String
+  GitHubToken:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /github/token
+
+Resources:
+  LangChainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: langchain-qa
+      Handler: main.lambda_handler
+      Runtime: python3.11
+      CodeUri:
+        Bucket: !Ref ArtifactBucket
+        Key: langchain/function.zip
+      MemorySize: 256
+      Timeout: 30
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /ask
+            Method: get
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PipelinePolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: "*"
+                Resource: "*"
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
+        - Name: Build
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: LangChainBuild
+      Source:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/python:3.11
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: S3_BUCKET_NAME
+            Value: !Ref ArtifactBucket
+      ServiceRole: !GetAtt CodePipelineRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+
+Outputs:
+  ApiURL:
+    Description: "Invoke URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/ask?q=hello"
