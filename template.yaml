@@ -44,8 +44,9 @@ Resources:
       Timeout: 20
       Role: !GetAtt LambdaRole.Arn
       Code:
-        S3Bucket: !Ref ArtifactBucket
-        S3Key: langchain/function.zip
+      S3Bucket: !Ref ArtifactBucket
+      S3Key: function.zip
+
 
   Api:
     Type: AWS::ApiGateway::RestApi
