@@ -27,9 +27,7 @@ Resources:
       FunctionName: langchain-qa
       Handler: main.lambda_handler
       Runtime: python3.11
-      CodeUri:
-        Bucket: !Ref ArtifactBucket
-        Key: function.zip
+      CodeUri: .
       Timeout: 30
       MemorySize: 256
       Events:
@@ -143,6 +141,22 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ProjectName: !Ref CodeBuildProject
+
+        - Name: Deploy
+          Actions:
+            - Name: DeployLambda
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              InputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: LangChainStack
+                Capabilities: CAPABILITY_IAM
+                TemplatePath: BuildOutput::packaged.yaml
 
 Outputs:
   ApiUrl:
