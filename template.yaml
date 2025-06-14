@@ -27,10 +27,7 @@ Resources:
       FunctionName: langchain-qa
       Handler: main.lambda_handler
       Runtime: python3.11
-      CodeUri:
-        Bucket: !Ref ArtifactBucket
-        Key: function.zip
-      MemorySize: 256
+      CodeUri: !Sub "s3://${ArtifactBucket}/${BuildOutputArtifact}"
       Timeout: 30
       Events:
         ApiEvent:
