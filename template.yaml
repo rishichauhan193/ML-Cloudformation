@@ -4,14 +4,17 @@ Description: LangChain QA Lambda with CI/CD
 
 Parameters:
   GitHubRepo:
+    Default: ML-Project
     Type: String
   GitHubOwner:
+    Default: rishichauhan193
     Type: String
   GitHubBranch:
+    Default: main
     Type: String
   GitHubToken:
     Type: AWS::SSM::Parameter::Value<String>
-    Default: /github/token
+    Default: /github/oauth/token
 
 Resources:
   LangChainFunction:
