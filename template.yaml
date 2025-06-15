@@ -56,7 +56,7 @@ Resources:
             Action: "s3:GetObject"
             Resource: !Sub "${WebsiteBucket.Arn}/*"
 
-  TicTacToeLambdaRole:
+    TicTacToeLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -77,6 +77,11 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codepipeline:StartPipelineExecution
+                Resource: "*"
+
 
   TicTacToeLambda:
     Type: AWS::Lambda::Function
