@@ -1,14 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Dual CodePipeline setup for Infra and ML Lambda
+Description: CI/CD - ML Code → Build → Infra Deploy via two pipelines
 
 Parameters:
   GitHubOwner:
     Type: String
     Default: rishichauhan193
-  GitHubRepoInfra:
-    Type: String
-    Default: ML-Cloudformation
-  GitHubRepoML:
+  GitHubRepo:
     Type: String
     Default: ML-Project
   GitHubBranch:
@@ -28,14 +25,9 @@ Resources:
     Properties:
       BucketName: !Ref ArtifactBucketName
 
-  ##############################
-  ## IAM ROLES
-  ##############################
-
-  CodePipelineRole:
+  PipelineRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: codepipeline-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -43,23 +35,22 @@ Resources:
             Principal: { Service: codepipeline.amazonaws.com }
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: CodePipelineAccess
+        - PolicyName: PipelineAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - codebuild:*
                   - s3:*
-                  - lambda:*
+                  - codebuild:*
                   - cloudformation:*
+                  - lambda:*
                   - iam:PassRole
                 Resource: '*'
 
   CodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: codebuild-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -67,71 +58,22 @@ Resources:
             Principal: { Service: codebuild.amazonaws.com }
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: CodeBuildPolicy
+        - PolicyName: BuildPermissions
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
+                  - s3:*
                   - logs:*
                   - lambda:*
-                  - s3:*
-                  - iam:PassRole
                 Resource: '*'
 
-  ##############################
-  ## Infra Deployment Pipeline
-  ##############################
-
-  InfraPipeline:
-    Type: AWS::CodePipeline::Pipeline
-    Properties:
-      Name: InfraPipeline
-      RoleArn: !GetAtt CodePipelineRole.Arn
-      ArtifactStore:
-        Type: S3
-        Location: !Ref ArtifactBucket
-      Stages:
-        - Name: Source
-          Actions:
-            - Name: SourceTemplate
-              ActionTypeId:
-                Category: Source
-                Owner: ThirdParty
-                Provider: GitHub
-                Version: 1
-              Configuration:
-                Owner: !Ref GitHubOwner
-                Repo: !Ref GitHubRepoInfra
-                Branch: !Ref GitHubBranch
-                OAuthToken: !Ref GitHubOAuthToken
-              OutputArtifacts:
-                - Name: InfraSource
-
-        - Name: Deploy
-          Actions:
-            - Name: DeployCFN
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Provider: CloudFormation
-                Version: 1
-              InputArtifacts:
-                - Name: InfraSource
-              Configuration:
-                ActionMode: CREATE_UPDATE
-                StackName: MLInfraStack
-                Capabilities: CAPABILITY_IAM
-                TemplatePath: InfraSource::template.yaml
-
-  ##############################
-  ## Lambda Build & Deploy Pipeline
-  ##############################
-
+  ## CodeBuild Project for ML
   LambdaBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: LangChainMLBuild
+      Name: MLProjectBuild
       Source:
         Type: CODEPIPELINE
         BuildSpec: buildspec.yaml
@@ -143,31 +85,31 @@ Resources:
         Type: LINUX_CONTAINER
       ServiceRole: !GetAtt CodeBuildRole.Arn
 
-  AppPipeline:
+  ## Pipeline 1: Build
+  MLBuildPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
-      Name: AppPipeline
-      RoleArn: !GetAtt CodePipelineRole.Arn
+      Name: MLProjectPipeline
+      RoleArn: !GetAtt PipelineRole.Arn
       ArtifactStore:
         Type: S3
         Location: !Ref ArtifactBucket
       Stages:
         - Name: Source
           Actions:
-            - Name: SourceCode
+            - Name: GitHubSource
               ActionTypeId:
                 Category: Source
                 Owner: ThirdParty
                 Provider: GitHub
                 Version: 1
+              OutputArtifacts:
+                - Name: SourceArtifact
               Configuration:
                 Owner: !Ref GitHubOwner
-                Repo: !Ref GitHubRepoML
+                Repo: !Ref GitHubRepo
                 Branch: !Ref GitHubBranch
                 OAuthToken: !Ref GitHubOAuthToken
-              OutputArtifacts:
-                - Name: SourceML
-
         - Name: Build
           Actions:
             - Name: LambdaBuild
@@ -177,29 +119,53 @@ Resources:
                 Provider: CodeBuild
                 Version: 1
               InputArtifacts:
-                - Name: SourceML
+                - Name: SourceArtifact
               OutputArtifacts:
-                - Name: BuiltLambda
+                - Name: BuiltOutput
               Configuration:
                 ProjectName: !Ref LambdaBuildProject
 
+  ## Pipeline 2: Deploy (Triggered manually or via Lambda)
+  InfraDeployPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: MLInfraPipeline
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: BuildOutputSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: 1
+              OutputArtifacts:
+                - Name: InfraTemplate
+              Configuration:
+                S3Bucket: !Ref ArtifactBucket
+                S3ObjectKey: function.zip
         - Name: Deploy
           Actions:
-            - Name: UpdateLambdaCode
+            - Name: DeployInfra
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
-                Provider: Lambda
+                Provider: CloudFormation
                 Version: 1
               InputArtifacts:
-                - Name: BuiltLambda
+                - Name: InfraTemplate
               Configuration:
-                FunctionName: LangChainApp
-                S3Bucket: !Ref ArtifactBucket
-                S3Key: function.zip
+                ActionMode: CREATE_UPDATE
+                StackName: ML-Deployed-Stack
+                Capabilities: CAPABILITY_IAM
+                TemplatePath: InfraTemplate::ML-cloudformation.yaml
 
 Outputs:
-  InfraPipelineName:
-    Value: !Ref InfraPipeline
-  AppPipelineName:
-    Value: !Ref AppPipeline
+  BuildPipeline:
+    Value: !Ref MLBuildPipeline
+  InfraPipeline:
+    Value: !Ref InfraDeployPipeline
