@@ -26,35 +26,6 @@ Resources:
   ArtifactStore:
     Type: AWS::S3::Bucket
 
-  WebsiteBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub "langchain-app-site-${AWS::AccountId}-${AWS::Region}"
-      WebsiteConfiguration:
-        IndexDocument: index.html
-      CorsConfiguration:
-        CorsRules:
-          - AllowedOrigins: ["*"]
-            AllowedMethods: ["GET"]
-            AllowedHeaders: ["*"]
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: false
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: false
-
-  WebsiteBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref WebsiteBucket
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: "*"
-            Action: "s3:GetObject"
-            Resource: !Sub "arn:aws:s3:::${WebsiteBucket}/*"
-
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -87,9 +58,8 @@ Resources:
       EphemeralStorage:
         Size: !Ref LambdaEphemeralStorage
       Code:
-        ZipFile: |
-          def lambda_handler(event, context):
-              return {"statusCode": 200, "body": "Lambda placeholder"}
+        S3Bucket: !Ref ArtifactStore
+        S3Key: function.zip
 
   LambdaAlias:
     Type: AWS::Lambda::Alias
@@ -158,7 +128,7 @@ Resources:
       Name: LangChainBuild
       Source:
         Type: CODEPIPELINE
-        BuildSpec: ML-Project/buildspec.yaml
+        BuildSpec: buildspec.yaml
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -249,8 +219,5 @@ Outputs:
   LambdaURL:
     Description: API Gateway Endpoint
     Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/dev/langchain
-  WebsiteURL:
-    Description: S3 Static Hosting URL
-    Value: !Sub http://${WebsiteBucket}.s3-website-${AWS::Region}.amazonaws.com
   CodePipelineName:
     Value: !Ref CodePipeline
