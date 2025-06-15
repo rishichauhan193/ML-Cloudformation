@@ -46,20 +46,21 @@ Resources:
                   - logs:*
                 Resource: "*"
 
-  LambdaFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: LangChainApp
-      Handler: lambda_function.lambda_handler
-      Runtime: python3.11
-      Timeout: 10
-      Role: !GetAtt LambdaRole.Arn
-      MemorySize: !Ref LambdaMemorySize
-      EphemeralStorage:
-        Size: !Ref LambdaEphemeralStorage
-      Code:
-        S3Bucket: !Ref ArtifactStore
-        S3Key: function.zip
+LambdaFunction:
+  Type: AWS::Lambda::Function
+  Properties:
+    FunctionName: LangChainApp
+    Handler: lambda_function.lambda_handler
+    Runtime: python3.11
+    Timeout: 10
+    Role: !GetAtt LambdaRole.Arn
+    MemorySize: !Ref LambdaMemorySize
+    EphemeralStorage:
+      Size: !Ref LambdaEphemeralStorage
+    Code:
+      S3Bucket: !Ref ArtifactStore
+      S3Key: !Sub "codepipeline/${AWS::Region}/${CodePipeline}/BuildOutput/function.zip"
+
 
   LambdaAlias:
     Type: AWS::Lambda::Alias
