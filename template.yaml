@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Single-pipeline CloudFormation setup for ML Lambda deployment.
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Tic-Tac-Toe App with Lambda, API Gateway, CodeBuild, CodePipeline, and S3 Hosting
 
 Parameters:
   GitHubOwner:
@@ -14,172 +15,262 @@ Parameters:
   GitHubOAuthToken:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /github/oauth/token
+  LambdaMemorySize:
+    Type: Number
+    Default: 512
+  LambdaEphemeralStorage:
+    Type: Number
+    Default: 512
 
 Resources:
 
-  LambdaArtifactBucket:
+  ArtifactStore:
+    Type: AWS::S3::Bucket
+
+  WebsiteBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "ml-project-artifacts-${AWS::AccountId}"
+      BucketName: !Sub "tictactoe-web-${AWS::AccountId}-${AWS::Region}"
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ["*"]
+            AllowedMethods: ["GET"]
+            AllowedHeaders: ["*"]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
 
-  LambdaExecutionRole:
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "${WebsiteBucket.Arn}/*"
+
+  TicTacToeLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: LambdaPermissions
+        - PolicyName: LambdaBasicExecution
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: "*"
 
-  MLProcessingLambda:
+  TicTacToeLambda:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: MLProcessingLambda
+      FunctionName: TicTacToeLambda
       Handler: lambda_function.lambda_handler
+      Role: !GetAtt TicTacToeLambdaRole.Arn
       Runtime: python3.9
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorage
       Code:
         ZipFile: |
           def lambda_handler(event, context):
-              return {"statusCode": 200, "body": "Placeholder"}
+              return {"statusCode": 200, "body": "Lambda placeholder"}
 
-  LambdaInvokePermission:
+  TicTacToeLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref MLProcessingLambda
       Action: lambda:InvokeFunction
+      FunctionName: !Ref TicTacToeLambda
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/mlprocess"
 
-  ApiGatewayRestApi:
+  ApiGateway:
     Type: AWS::ApiGateway::RestApi
     Properties:
-      Name: MLProcessingApi
+      Name: TicTacToeApi
 
-  ApiGatewayResource:
+  ApiResource:
     Type: AWS::ApiGateway::Resource
     Properties:
-      RestApiId: !Ref ApiGatewayRestApi
-      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
-      PathPart: mlprocess
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: tictactoe
+      RestApiId: !Ref ApiGateway
 
-  ApiGatewayMethod:
+  ApiMethod:
     Type: AWS::ApiGateway::Method
     Properties:
-      RestApiId: !Ref ApiGatewayRestApi
-      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiResource
       HttpMethod: POST
       AuthorizationType: NONE
       Integration:
         IntegrationHttpMethod: POST
         Type: AWS_PROXY
         Uri: !Sub
-          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
-          - { LambdaArn: !GetAtt MLProcessingLambda.Arn }
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TicTacToeLambda.Arn}/invocations
 
-  MLProjectPipelineRole:
+  ApiOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ""
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: dev
+
+  CodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BuildLambdaCode
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                  - lambda:UpdateFunctionCode
+                  - lambda:GetFunction
+                  - s3:*
+                Resource: "*"
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: TicTacToeBuild
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: LAMBDA_FUNCTION_NAME
+            Value: !Ref TicTacToeLambda
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: MLProjectPipelinePermissions
+        - PolicyName: PipelinePermissions
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                Resource: !Sub "arn:aws:s3:::ml-project-artifacts-${AWS::AccountId}/*"
-              - Effect: Allow
-                Action:
-                  - codebuild:StartBuild
-                  - codebuild:BatchGetBuilds
-                Resource: !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/MLProjectCodeBuild
-              - Effect: Allow
-                Action:
+                  - codebuild:*
+                  - s3:*
+                  - iam:PassRole
                   - lambda:UpdateFunctionCode
-                Resource: !GetAtt MLProcessingLambda.Arn
+                  - lambda:GetFunction
+                Resource: "*"
 
-  MLProjectPipeline:
+  Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
-      Name: MLProjectPipeline
-      RoleArn: !GetAtt MLProjectPipelineRole.Arn
+      RoleArn: !GetAtt CodePipelineRole.Arn
       ArtifactStore:
         Type: S3
-        Location: !Ref LambdaArtifactBucket
+        Location: !Ref ArtifactStore
       Stages:
         - Name: Source
           Actions:
-            - Name: SourceFetch
+            - Name: GitHub_Source
               ActionTypeId:
                 Category: Source
                 Owner: ThirdParty
                 Provider: GitHub
-                Version: '1'
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceOutput
               Configuration:
                 Owner: !Ref GitHubOwner
                 Repo: !Ref GitHubRepo
                 Branch: !Ref GitHubBranch
                 OAuthToken: !Ref GitHubOAuthToken
-              OutputArtifacts:
-                - Name: SourceArtifact
+                PollForSourceChanges: false
+              RunOrder: 1
         - Name: Build
           Actions:
-            - Name: BuildLambda
+            - Name: Lambda_Build
               ActionTypeId:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
-                Version: '1'
-              Configuration:
-                ProjectName: MLProjectCodeBuild
+                Version: 1
               InputArtifacts:
-                - Name: SourceArtifact
+                - Name: SourceOutput
               OutputArtifacts:
-                - Name: BuildArtifact
-        - Name: Deploy
-          Actions:
-          - Name: DeployLambda
-            ActionTypeId:
-              Category: Deploy
-              Owner: AWS
-              Provider: CloudFormation
-              Version: '1'
-            Configuration:
-              ActionMode: REPLACE_ON_FAILURE
-              StackName: LambdaDeploymentStack
-              Capabilities: CAPABILITY_NAMED_IAM
-              TemplatePath: BuildArtifact::lambda-cfn.yaml
-            InputArtifacts:
-              - Name: BuildArtifact
-
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
 
 Outputs:
+  WebsiteURL:
+    Description: Static Site Hosted on S3
+    Value: !Sub "http://${WebsiteBucket}.s3-website-${AWS::Region}.amazonaws.com"
+
   ApiEndpoint:
-    Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/mlprocess"
-  MLProcessingLambdaARN:
-    Value: !GetAtt MLProcessingLambda.Arn
-  MLProjectPipelineName:
-    Value: !Ref MLProjectPipeline
+    Description: POST Endpoint
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/dev/tictactoe"
