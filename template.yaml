@@ -1,18 +1,31 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CloudFormation setup for MLCloudFormationPipeline and event-based triggering.
+Description: CloudFormation setup for MLProjectPipeline and MLCloudFormationPipeline with proper sequencing.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Default: rishichauhan193
+  GitHubRepo:
+    Type: String
+    Default: ML-Project
+  GitHubBranch:
+    Type: String
+    Default: main
+  GitHubOAuthToken:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /github/oauth/token
 
 Resources:
-  # S3 Bucket for Lambda Package
+  # **S3 Bucket for Lambda Artifacts**
   LambdaArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "ml-lambda-artifacts-${AWS::AccountId}"
 
-  # IAM Role for CodePipeline
-  CodePipelineRole:
+  # **IAM Role for MLProjectPipeline**
+  MLProjectPipelineRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: MLCloudFormationPipelineRole
       AssumeRolePolicyDocument:
         Statement:
           - Effect: Allow
@@ -20,59 +33,110 @@ Resources:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: CodePipelinePermissions
+        - PolicyName: MLProjectPipelinePermissions
           PolicyDocument:
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject
                   - s3:PutObject
+                  - s3:GetObject
                 Resource: !Sub "arn:aws:s3:::ml-lambda-artifacts-${AWS::AccountId}/*"
-              - Effect: Allow
-                Action:
-                  - lambda:UpdateFunctionCode
-                Resource: !GetAtt MLProcessingLambda.Arn
 
-  # Lambda Function that will be deployed
-  MLProcessingLambda:
-    Type: AWS::Lambda::Function
+  # **CodePipeline for ML Project (Builds and uploads Lambda package)**
+  MLProjectPipeline:
+    Type: AWS::CodePipeline::Pipeline
     Properties:
-      FunctionName: MLProcessingLambda
-      Handler: lambda_function.lambda_handler
-      Runtime: python3.8
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Code:
-        S3Bucket: !Ref LambdaArtifactBucket
-        S3Key: lambda_package.zip
+      Name: MLProjectPipeline
+      RoleArn: !GetAtt MLProjectPipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref LambdaArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceFetch
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: '1'
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubOAuthToken
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: BuildLambda
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: MLProjectCodeBuild
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+        - Name: UploadToS3
+          Actions:
+            - Name: UploadArtifact
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              Configuration:
+                BucketName: !Ref LambdaArtifactBucket
+                Extract: false
+                ObjectKey: lambda_package.zip
+              InputArtifacts:
+                - Name: BuildArtifact
 
-  # IAM Role for Lambda
-  LambdaExecutionRole:
+  # **IAM Role for MLCloudFormationPipeline**
+  MLCloudFormationPipelineRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: LambdaPermissions
+        - PolicyName: MLCloudFormationPipelinePermissions
           PolicyDocument:
             Statement:
               - Effect: Allow
                 Action:
                   - s3:GetObject
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: "*"
+                Resource: !Sub "arn:aws:s3:::ml-lambda-artifacts-${AWS::AccountId}/*"
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                Resource: !GetAtt MLProcessingLambda.Arn
 
-  # CodePipeline for Lambda Deployment
+  # **Lambda Function that will be deployed**
+  MLProcessingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MLProcessingLambda
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucket
+        S3Key: lambda_package.zip
+
+  # **CodePipeline for Lambda Deployment**
   MLCloudFormationPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       Name: MLCloudFormationPipeline
-      RoleArn: !GetAtt CodePipelineRole.Arn
+      RoleArn: !GetAtt MLCloudFormationPipelineRole.Arn
       ArtifactStore:
         Type: S3
         Location: !Ref LambdaArtifactBucket
@@ -103,7 +167,7 @@ Resources:
                 S3Bucket: !Ref LambdaArtifactBucket
                 S3Key: lambda_package.zip
 
-  # EventBridge Rule to trigger CodePipeline
+  # **EventBridge Rule: Ensure MLCloudFormationPipeline runs only after MLProjectPipeline succeeds**
   PipelineTriggerRule:
     Type: AWS::Events::Rule
     Properties:
@@ -122,13 +186,13 @@ Resources:
         - Arn: !GetAtt PipelineTriggerLambda.Arn
           Id: "MLPipelineTriggerTarget"
 
-  # Lambda Function to start CodePipeline when MLProjectPipeline succeeds
+  # **Lambda Function: Start MLCloudFormationPipeline only after MLProjectPipeline succeeds**
   PipelineTriggerLambda:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: MLCloudFormationTrigger
       Handler: index.lambda_handler
-      Runtime: python3.8
+      Runtime: python3.9
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
         ZipFile: |
@@ -145,10 +209,21 @@ Resources:
                   "body": json.dumps({"message": "Pipeline triggered"})
               }
 
-  # Permission for EventBridge to invoke the Lambda
+  # **Permission for EventBridge to invoke the Lambda**
   EventBridgeInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref PipelineTriggerLambda
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
+
+Outputs:
+  MLProcessingLambdaARN:
+    Description: "ARN of the deployed Lambda function"
+    Value: !GetAtt MLProcessingLambda.Arn
+  MLProjectPipelineName:
+    Description: "Name of MLProjectPipeline"
+    Value: !Ref MLProjectPipeline
+  MLCloudFormationPipelineName:
+    Description: "Name of MLCloudFormationPipeline"
+    Value: !Ref MLCloudFormationPipeline
