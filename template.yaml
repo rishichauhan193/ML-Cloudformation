@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CI/CD - ML Code -> Build -> Infra Deploy via two pipelines (sequential)
+Description: ML Lambda CI/CD with 2-stage Pipeline (Build & Deploy)
 
 Parameters:
   GitHubOwner:
@@ -29,7 +29,8 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal: { Service: codepipeline.amazonaws.com }
+            Principal:
+              Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: PipelineAccess
@@ -52,7 +53,8 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal: { Service: codebuild.amazonaws.com }
+            Principal:
+              Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: BuildPermissions
@@ -81,6 +83,7 @@ Resources:
         Type: LINUX_CONTAINER
       ServiceRole: !GetAtt CodeBuildRole.Arn
 
+  ## Pipeline 1: Build
   MLBuildPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -116,11 +119,12 @@ Resources:
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
-                - Name: BuiltOutput
+                - Name: BuildOutput
               Configuration:
                 ProjectName: !Ref LambdaBuildProject
 
-  InfraDeployPipeline:
+  ## Pipeline 2: Deploy
+  MLDeployPipeline:
     Type: AWS::CodePipeline::Pipeline
     DependsOn: MLBuildPipeline
     Properties:
@@ -132,7 +136,7 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            - Name: S3Source
+            - Name: CFSource
               ActionTypeId:
                 Category: Source
                 Owner: AWS
@@ -145,7 +149,7 @@ Resources:
                 S3ObjectKey: ML-cloudformation/template.yaml
         - Name: Deploy
           Actions:
-            - Name: DeployInfra
+            - Name: DeployStack
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
@@ -155,14 +159,12 @@ Resources:
                 - Name: InfraTemplate
               Configuration:
                 ActionMode: CREATE_UPDATE
-                StackName: ML-Deployed-Stack
+                StackName: LangChainDeployedStack
                 Capabilities: CAPABILITY_IAM
-                TemplatePath: InfraTemplate::ML-cloudformation/template.yaml
+                TemplatePath: InfraTemplate::template.yaml
 
 Outputs:
   BuildPipeline:
-    Description: CodePipeline for building ML project
     Value: !Ref MLBuildPipeline
-  InfraPipeline:
-    Description: CodePipeline for deploying ML infrastructure
-    Value: !Ref InfraDeployPipeline
+  DeployPipeline:
+    Value: !Ref MLDeployPipeline
