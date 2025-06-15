@@ -1,6 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
-Description: LangChain QA Lambda with FAISS and CI/CD
+Description: LangChain CI/CD Pipeline for Lambda API using GitHub and CodePipeline
 
 Parameters:
   GitHubOwner:
@@ -20,64 +19,6 @@ Resources:
 
   ArtifactBucket:
     Type: AWS::S3::Bucket
-
-  LambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  LangChainLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: LangChainQALambda
-      Handler: lambda_function.lambda_handler
-      Runtime: python3.11
-      MemorySize: 512
-      Timeout: 20
-      Role: !GetAtt LambdaRole.Arn
-      Code:
-        S3Bucket: !Ref ArtifactBucket
-        S3Key: function.zip
-
-  Api:
-    Type: AWS::ApiGateway::RestApi
-    Properties:
-      Name: LangChainAPI
-
-  Resource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref Api
-      ParentId: !GetAtt Api.RootResourceId
-      PathPart: qa
-
-  Method:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref Api
-      ResourceId: !Ref Resource
-      HttpMethod: GET
-      AuthorizationType: NONE
-      Integration:
-        IntegrationHttpMethod: POST
-        Type: AWS_PROXY
-        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LangChainLambda.Arn}/invocations
-
-  LambdaInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref LangChainLambda
-      Action: lambda:InvokeFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/GET/qa
 
   CodeBuildRole:
     Type: AWS::IAM::Role
@@ -108,6 +49,7 @@ Resources:
       Name: LangChainLambdaBuild
       Source:
         Type: CODEPIPELINE
+        BuildSpec: ML-Project/buildspec.yaml  # 👈 locate buildspec
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -115,6 +57,7 @@ Resources:
         Image: aws/codebuild/standard:7.0
         Type: LINUX_CONTAINER
       ServiceRole: !GetAtt CodeBuildRole.Arn
+      TimeoutInMinutes: 10
 
   CodePipelineRole:
     Type: AWS::IAM::Role
@@ -192,9 +135,11 @@ Resources:
                 ActionMode: CREATE_UPDATE
                 StackName: LangChainQAStack
                 Capabilities: CAPABILITY_IAM
-                TemplatePath: BuildOutput::template.yaml
+                TemplatePath: BuildOutput::ML-Cloudformation/template.yaml  # 👈 deploy from here
               RunOrder: 1
 
 Outputs:
-  ApiUrl:
-    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/dev/qa"
+  PipelineName:
+    Value: !Ref CodePipeline
+  ArtifactBucket:
+    Value: !Ref ArtifactBucket
