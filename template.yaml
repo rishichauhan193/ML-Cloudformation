@@ -16,7 +16,7 @@ Parameters:
     Default: /github/oauth/token
   ArtifactBucketName:
     Type: String
-    Default: cicd-python-bkt
+    Default: cicd-python-bkt-unique-${AWS::AccountId}
 
 Resources:
 
