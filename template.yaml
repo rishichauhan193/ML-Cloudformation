@@ -219,9 +219,8 @@ Resources:
                 Provider: S3
                 Version: '1'
               Configuration:
-                BucketName: !Ref LambdaArtifactBucket
-                Extract: false
-                ObjectKey: lambda_package.zip
+                S3Bucket: !Ref LambdaArtifactBucket
+                S3ObjectKey: lambda_package.zip
               OutputArtifacts:
                 - Name: SourceArtifact
         - Name: Deploy
@@ -238,6 +237,7 @@ Resources:
                 S3Key: lambda_package.zip
               InputArtifacts:
                 - Name: SourceArtifact
+
 
 Outputs:
   ApiEndpoint:
