@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: LangChain CI/CD Pipeline for Lambda API using GitHub and CodePipeline
+Description: Serverless LangChain + TicTacToe Lambda App with CI/CD via GitHub, CodeBuild, CodePipeline, and S3 hosting
 
 Parameters:
   GitHubOwner:
@@ -14,11 +14,121 @@ Parameters:
   GitHubOAuthToken:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /github/oauth/token
+  LambdaMemorySize:
+    Type: Number
+    Default: 512
+  LambdaEphemeralStorage:
+    Type: String
+    Default: 512
 
 Resources:
 
-  ArtifactBucket:
+  ArtifactStore:
     Type: AWS::S3::Bucket
+
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "langchain-app-site-${AWS::AccountId}-${AWS::Region}"
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ["*"]
+            AllowedMethods: ["GET"]
+            AllowedHeaders: ["*"]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${WebsiteBucket}/*"
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaBasicExecution
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: "*"
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: LangChainApp
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.11
+      Timeout: 10
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: !Ref LambdaMemorySize
+      EphemeralStorage:
+        Size: !Ref LambdaEphemeralStorage
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {"statusCode": 200, "body": "Lambda placeholder"}
+
+  LambdaAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      FunctionVersion: $LATEST
+      Name: live
+
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: LangChainAPI
+
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: langchain
+
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/POST/langchain
 
   CodeBuildRole:
     Type: AWS::IAM::Role
@@ -31,25 +141,24 @@ Resources:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: BuildLambdaArtifacts
+        - PolicyName: CodeBuildAccess
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:ListBucket
                   - logs:*
+                  - lambda:GetFunction
+                  - s3:*
                 Resource: "*"
 
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: LangChainLambdaBuild
+      Name: LangChainBuild
       Source:
         Type: CODEPIPELINE
-        BuildSpec: ML-Project/buildspec.yaml  # 👈 locate buildspec
+        BuildSpec: ML-Project/buildspec.yaml
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -57,7 +166,6 @@ Resources:
         Image: aws/codebuild/standard:7.0
         Type: LINUX_CONTAINER
       ServiceRole: !GetAtt CodeBuildRole.Arn
-      TimeoutInMinutes: 10
 
   CodePipelineRole:
     Type: AWS::IAM::Role
@@ -70,7 +178,7 @@ Resources:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: CodePipelinePolicy
+        - PolicyName: CodePipelineAccess
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -78,8 +186,10 @@ Resources:
                 Action:
                   - codebuild:*
                   - s3:*
-                  - cloudformation:*
+                  - lambda:GetFunction
+                  - lambda:UpdateFunctionCode
                   - iam:PassRole
+                  - cloudformation:*
                 Resource: "*"
 
   CodePipeline:
@@ -88,11 +198,11 @@ Resources:
       RoleArn: !GetAtt CodePipelineRole.Arn
       ArtifactStore:
         Type: S3
-        Location: !Ref ArtifactBucket
+        Location: !Ref ArtifactStore
       Stages:
         - Name: Source
           Actions:
-            - Name: SourceAction
+            - Name: GitHubSource
               ActionTypeId:
                 Category: Source
                 Owner: ThirdParty
@@ -105,7 +215,6 @@ Resources:
                 Repo: !Ref GitHubRepo
                 Branch: !Ref GitHubBranch
                 OAuthToken: !Ref GitHubOAuthToken
-
         - Name: Build
           Actions:
             - Name: LambdaBuild
@@ -120,7 +229,6 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ProjectName: !Ref CodeBuildProject
-
         - Name: Deploy
           Actions:
             - Name: DeployCFN
@@ -133,13 +241,16 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ActionMode: CREATE_UPDATE
-                StackName: LangChainQAStack
+                StackName: LangChainAppStack
                 Capabilities: CAPABILITY_IAM
-                TemplatePath: BuildOutput::ML-Cloudformation/template.yaml  # 👈 deploy from here
-              RunOrder: 1
+                TemplatePath: BuildOutput::ML-Cloudformation/template.yaml
 
 Outputs:
-  PipelineName:
+  LambdaURL:
+    Description: API Gateway Endpoint
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/dev/langchain
+  WebsiteURL:
+    Description: S3 Static Hosting URL
+    Value: !Sub http://${WebsiteBucket}.s3-website-${AWS::Region}.amazonaws.com
+  CodePipelineName:
     Value: !Ref CodePipeline
-  ArtifactBucket:
-    Value: !Ref ArtifactBucket
