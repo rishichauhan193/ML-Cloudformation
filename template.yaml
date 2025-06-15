@@ -161,17 +161,20 @@ Resources:
                 - Name: BuildArtifact
         - Name: Deploy
           Actions:
-            - Name: DeployLambda
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Provider: Lambda
-                Version: '1'
-              Configuration:
-                FunctionName: !Ref MLProcessingLambda
-                UserParameters: lambda_package.zip
-              InputArtifacts:
-                - Name: BuildArtifact
+          - Name: DeployLambda
+            ActionTypeId:
+              Category: Deploy
+              Owner: AWS
+              Provider: CloudFormation
+              Version: '1'
+            Configuration:
+              ActionMode: REPLACE_ON_FAILURE
+              StackName: LambdaDeploymentStack
+              Capabilities: CAPABILITY_NAMED_IAM
+              TemplatePath: BuildArtifact::lambda-cfn.yaml
+            InputArtifacts:
+              - Name: BuildArtifact
+
 
 Outputs:
   ApiEndpoint:
