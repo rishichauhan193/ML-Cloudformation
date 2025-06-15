@@ -65,6 +65,13 @@ Resources:
                   - s3:GetObject
                   - lambda:UpdateFunctionCode
                   - lambda:GetFunction
+                  - iam:CreateRole
+                  - iam:PutRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:TagPolicy
                 Resource: "*"
 
   LambdaExecutionRole:
