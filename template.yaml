@@ -16,13 +16,11 @@ Parameters:
     Default: /github/oauth/token
 
 Resources:
-  # **S3 Bucket for Lambda Artifacts**
   LambdaArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "ml-project-artifacts-${AWS::AccountId}"
 
-  # **IAM Role for MLProjectPipeline**
   MLProjectPipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -42,7 +40,28 @@ Resources:
                   - s3:GetObject
                 Resource: !Sub "arn:aws:s3:::ml-project-artifacts-${AWS::AccountId}/*"
 
-  # **IAM Role for Lambda Execution**
+  MLCloudFormationPipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MLCloudFormationPipelinePermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - lambda:UpdateFunctionCode
+                  - lambda:GetFunction
+                Resource: "*"
+
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -65,7 +84,6 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: "*"
 
-  # **MLProcessingLambda Function**
   MLProcessingLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -77,7 +95,6 @@ Resources:
         S3Bucket: !Ref LambdaArtifactBucket
         S3Key: lambda_package.zip
 
-  # **API Gateway Setup**
   ApiGatewayRestApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -113,7 +130,6 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/mlprocess"
 
-  # **CodePipeline for ML Project**
   MLProjectPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -167,30 +183,6 @@ Resources:
               InputArtifacts:
                 - Name: BuildArtifact
 
-    MLCloudFormationPipelineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codepipeline.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: MLCloudFormationPipelinePermissions
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - lambda:UpdateFunctionCode
-                  - lambda:GetFunction
-                Resource: "*"
-
-
-  # **CodePipeline for Lambda Deployment**
   MLCloudFormationPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -231,12 +223,15 @@ Outputs:
   ApiEndpoint:
     Description: "API Gateway Endpoint for ML Processing"
     Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/mlprocess"
+
   MLProcessingLambdaARN:
     Description: "ARN of the deployed Lambda function"
     Value: !GetAtt MLProcessingLambda.Arn
+
   MLProjectPipelineName:
     Description: "Name of MLProjectPipeline"
     Value: !Ref MLProjectPipeline
+
   MLCloudFormationPipelineName:
     Description: "Name of MLCloudFormationPipeline"
     Value: !Ref MLCloudFormationPipeline
