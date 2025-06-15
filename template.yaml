@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CloudFormation setup for MLProjectPipeline and MLCloudFormationPipeline with proper sequencing.
+Description: CloudFormation setup for MLProjectPipeline, MLCloudFormationPipeline, and API Gateway integration.
 
 Parameters:
   GitHubOwner:
@@ -20,7 +20,7 @@ Resources:
   LambdaArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "ml-lambda-artifacts-${AWS::AccountId}"
+      BucketName: !Sub "ml-project-artifacts-${AWS::AccountId}"
 
   # **IAM Role for MLProjectPipeline**
   MLProjectPipelineRole:
@@ -40,7 +40,7 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
-                Resource: !Sub "arn:aws:s3:::ml-lambda-artifacts-${AWS::AccountId}/*"
+                Resource: !Sub "arn:aws:s3:::ml-project-artifacts-${AWS::AccountId}/*"
 
   # **IAM Role for Lambda Execution**
   LambdaExecutionRole:
@@ -62,9 +62,58 @@ Resources:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
+                  - lambda:InvokeFunction
                 Resource: "*"
 
-  # **MLProjectPipeline (Builds and uploads Lambda package)**
+  # **MLProcessingLambda Function**
+  MLProcessingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: MLProcessingLambda
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucket
+        S3Key: lambda_package.zip
+
+  # **API Gateway Setup**
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MLProcessingApi
+      Description: API Gateway for ML Processing Lambda
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: mlprocess
+
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+          - { LambdaArn: !GetAtt MLProcessingLambda.Arn }
+
+  LambdaApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MLProcessingLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/POST/mlprocess"
+
+  # **CodePipeline for ML Project**
   MLProjectPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -118,41 +167,6 @@ Resources:
               InputArtifacts:
                 - Name: BuildArtifact
 
-  # **IAM Role for MLCloudFormationPipeline**
-  MLCloudFormationPipelineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codepipeline.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: MLCloudFormationPipelinePermissions
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                Resource: !Sub "arn:aws:s3:::ml-lambda-artifacts-${AWS::AccountId}/*"
-              - Effect: Allow
-                Action:
-                  - lambda:UpdateFunctionCode
-                Resource: !GetAtt MLProcessingLambda.Arn
-
-  # **Lambda Function that will be deployed**
-  MLProcessingLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: MLProcessingLambda
-      Handler: lambda_function.lambda_handler
-      Runtime: python3.9
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Code:
-        S3Bucket: !Ref LambdaArtifactBucket
-        S3Key: lambda_package.zip
-
   # **CodePipeline for Lambda Deployment**
   MLCloudFormationPipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -172,8 +186,9 @@ Resources:
                 Provider: S3
                 Version: '1'
               Configuration:
-                S3Bucket: !Ref LambdaArtifactBucket
-                S3ObjectKey: lambda_package.zip
+                BucketName: !Ref LambdaArtifactBucket
+                Extract: false
+                ObjectKey: lambda_package.zip
               OutputArtifacts:
                 - Name: SourceArtifact
         - Name: Deploy
@@ -189,57 +204,10 @@ Resources:
                 S3Bucket: !Ref LambdaArtifactBucket
                 S3Key: lambda_package.zip
 
-  # **EventBridge Rule: Ensure MLCloudFormationPipeline runs only after MLProjectPipeline succeeds**
-  PipelineTriggerRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: MLProjectPipelineSuccessTrigger
-      EventPattern:
-        source:
-          - aws.codepipeline
-        detail-type:
-          - CodePipeline Pipeline Execution State Change
-        detail:
-          state:
-            - SUCCEEDED
-          pipeline:
-            - "MLProjectPipeline"
-      Targets:
-        - Arn: !GetAtt PipelineTriggerLambda.Arn
-          Id: "MLPipelineTriggerTarget"
-
-  # **Lambda Function: Start MLCloudFormationPipeline only after MLProjectPipeline succeeds**
-  PipelineTriggerLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: MLCloudFormationTrigger
-      Handler: index.lambda_handler
-      Runtime: python3.9
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Code:
-        ZipFile: |
-          import json
-          import boto3
-
-          def lambda_handler(event, context):
-              client = boto3.client('codepipeline')
-              response = client.start_pipeline_execution(
-                  name='MLCloudFormationPipeline'
-              )
-              return {
-                  "statusCode": 200,
-                  "body": json.dumps({"message": "Pipeline triggered"})
-              }
-
-  # **Permission for EventBridge to invoke the Lambda**
-  EventBridgeInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref PipelineTriggerLambda
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-
 Outputs:
+  ApiEndpoint:
+    Description: "API Gateway Endpoint for ML Processing"
+    Value: !Sub "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/mlprocess"
   MLProcessingLambdaARN:
     Description: "ARN of the deployed Lambda function"
     Value: !GetAtt MLProcessingLambda.Arn
