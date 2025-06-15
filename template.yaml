@@ -233,8 +233,6 @@ Resources:
                 Version: '1'
               Configuration:
                 FunctionName: !Ref MLProcessingLambda
-                S3Bucket: !Ref LambdaArtifactBucket
-                S3Key: lambda_package.zip
               InputArtifacts:
                 - Name: SourceArtifact
 
