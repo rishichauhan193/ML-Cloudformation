@@ -167,6 +167,29 @@ Resources:
               InputArtifacts:
                 - Name: BuildArtifact
 
+    MLCloudFormationPipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MLCloudFormationPipelinePermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - lambda:UpdateFunctionCode
+                  - lambda:GetFunction
+                Resource: "*"
+
+
   # **CodePipeline for Lambda Deployment**
   MLCloudFormationPipeline:
     Type: AWS::CodePipeline::Pipeline
