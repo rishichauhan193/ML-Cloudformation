@@ -42,7 +42,29 @@ Resources:
                   - s3:GetObject
                 Resource: !Sub "arn:aws:s3:::ml-lambda-artifacts-${AWS::AccountId}/*"
 
-  # **CodePipeline for ML Project (Builds and uploads Lambda package)**
+  # **IAM Role for Lambda Execution**
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPermissions
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # **MLProjectPipeline (Builds and uploads Lambda package)**
   MLProjectPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
