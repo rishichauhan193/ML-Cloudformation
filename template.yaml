@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CI/CD - ML Code → Build → Infra Deploy via two pipelines
+Description: CI/CD - ML Code -> Build -> Infra Deploy via two pipelines (sequential)
 
 Parameters:
   GitHubOwner:
@@ -14,16 +14,13 @@ Parameters:
   GitHubOAuthToken:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /github/oauth/token
-  ArtifactBucketName:
-    Type: String
-    Default: cicd-python-bkt-unique-${AWS::AccountId}
 
 Resources:
 
   ArtifactBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Ref ArtifactBucketName
+      BucketName: !Sub cicd-artifact-${AWS::AccountId}-${AWS::Region}
 
   PipelineRole:
     Type: AWS::IAM::Role
@@ -69,7 +66,6 @@ Resources:
                   - lambda:*
                 Resource: '*'
 
-  ## CodeBuild Project for ML
   LambdaBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -85,7 +81,6 @@ Resources:
         Type: LINUX_CONTAINER
       ServiceRole: !GetAtt CodeBuildRole.Arn
 
-  ## Pipeline 1: Build
   MLBuildPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -125,9 +120,9 @@ Resources:
               Configuration:
                 ProjectName: !Ref LambdaBuildProject
 
-  ## Pipeline 2: Deploy (Triggered manually or via Lambda)
   InfraDeployPipeline:
     Type: AWS::CodePipeline::Pipeline
+    DependsOn: MLBuildPipeline
     Properties:
       Name: MLInfraPipeline
       RoleArn: !GetAtt PipelineRole.Arn
@@ -137,7 +132,7 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            - Name: BuildOutputSource
+            - Name: S3Source
               ActionTypeId:
                 Category: Source
                 Owner: AWS
@@ -147,7 +142,7 @@ Resources:
                 - Name: InfraTemplate
               Configuration:
                 S3Bucket: !Ref ArtifactBucket
-                S3ObjectKey: function.zip
+                S3ObjectKey: ML-cloudformation/template.yaml
         - Name: Deploy
           Actions:
             - Name: DeployInfra
@@ -162,10 +157,12 @@ Resources:
                 ActionMode: CREATE_UPDATE
                 StackName: ML-Deployed-Stack
                 Capabilities: CAPABILITY_IAM
-                TemplatePath: InfraTemplate::ML-cloudformation.yaml
+                TemplatePath: InfraTemplate::ML-cloudformation/template.yaml
 
 Outputs:
   BuildPipeline:
+    Description: CodePipeline for building ML project
     Value: !Ref MLBuildPipeline
   InfraPipeline:
+    Description: CodePipeline for deploying ML infrastructure
     Value: !Ref InfraDeployPipeline
